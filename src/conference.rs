@@ -4,8 +4,8 @@ use anyhow::{anyhow, bail, Context, Result};
 use async_trait::async_trait;
 use colibri::{ColibriMessage, JsonMessage};
 use futures::stream::StreamExt;
-use jitsi_jingle_sdp::{jingle_to_sdp, sdp_to_jingle, SessionDescription};
-use jitsi_xmpp_parsers::jingle::{Action, Jingle};
+use jitsi_jingle_sdp::{SessionDescription, SessionDescriptionJingleConversionsExt};
+use jitsi_xmpp_parsers::jingle::{Action, Jingle, Transport};
 use maplit::hashmap;
 use once_cell::sync::Lazy;
 use serde::Serialize;
@@ -114,6 +114,7 @@ pub(crate) struct ConferenceInner {
   send_resolution: Option<i32>,
   accept_iq_id: Option<String>,
   jingle_session_id: Option<String>,
+  remote_description: Option<SessionDescription>,
   colibri_url: Option<String>,
   colibri_channel: Option<ColibriChannel>,
   connected_tx: Option<oneshot::Sender<()>>,
@@ -198,6 +199,7 @@ impl Conference {
         send_resolution: None,
         accept_iq_id: None,
         jingle_session_id: None,
+        remote_description: None,
         colibri_url: None,
         colibri_channel: None,
         connected_tx: Some(tx),
@@ -216,16 +218,22 @@ impl Conference {
   }
 
   pub async fn accept(&self, sdp: SessionDescription) -> Result<()> {
-    let session_id = self.inner.lock().await.jingle_session_id.take().context("no jingle session to accept")?;
-    let jingle = sdp_to_jingle(
+    let session_id = self
+      .inner
+      .lock()
+      .await
+      .jingle_session_id
+      .take()
+      .context("no jingle session to accept")?;
+    let jingle = sdp.try_to_jingle(
       Action::SessionAccept,
       &session_id,
       &self.focus_jid_in_muc()?.to_string(),
       &self.jid.to_string(),
-      &sdp,
     )?;
     let accept_iq_id = generate_id();
-    let session_accept_iq = Iq::from_set(accept_iq_id.clone(), jingle)
+    self.inner.lock().await.accept_iq_id = Some(accept_iq_id.clone());
+    let session_accept_iq = Iq::from_set(accept_iq_id, jingle)
       .with_to(Jid::Full(self.focus_jid_in_muc()?))
       .with_from(Jid::Full(self.jid.clone()));
     self.xmpp_tx.send(session_accept_iq.into()).await?;
@@ -425,21 +433,60 @@ impl StanzaFilter for Conference {
                         .with_from(Jid::Full(self.jid.clone()));
                       self.xmpp_tx.send(result_iq.into()).await?;
 
-                      self.inner.lock().await.jingle_session_id = Some(jingle.sid.0.clone());
+                      {
+                        let mut locked_inner = self.inner.lock().await;
+                        locked_inner.jingle_session_id = Some(jingle.sid.0.clone());
+                        if let Some(Transport::IceUdp(ice_transport)) =
+                          jingle.contents.first().and_then(|c| c.transport.as_ref())
+                        {
+                          locked_inner.colibri_url =
+                            ice_transport.web_socket.clone().map(|ws| ws.url);
+                        }
+                      };
 
-                      let offer_sdp = jingle_to_sdp(&jingle)?;
+                      let offer_sdp = SessionDescription::try_from_jingle(&jingle)?;
 
-                      if let Err(e) = self
+                      match self
                         .config
                         .agent
-                        .offer_received(self.clone(), offer_sdp)
+                        .offer_received(self.clone(), offer_sdp.clone(), true)
                         .await
                       {
-                        error!("agent offer_received failed: {:?}", e);
+                        Ok(_) => {
+                          self.inner.lock().await.remote_description = Some(offer_sdp);
+                          debug!("Saved new remote description");
+                        },
+                        Err(e) => error!("agent offer_received failed: {:?}", e),
                       }
                     }
                     else {
-                      debug!("Ignored Jingle session-initiate from {}", from_jid);
+                      debug!(
+                        "Ignored Jingle session-initiate from {} (P2P not supported)",
+                        from_jid
+                      );
+                    }
+                  }
+                  else if jingle.action == Action::SessionTerminate {
+                    if from_jid.resource == "focus" {
+                      debug!("Received Jingle session-terminate");
+
+                      // Acknowledge the IQ
+                      let result_iq = Iq::empty_result(Jid::Full(from_jid.clone()), iq.id.clone())
+                        .with_from(Jid::Full(self.jid.clone()));
+                      self.xmpp_tx.send(result_iq.into()).await?;
+
+                      let mut locked_inner = self.inner.lock().await;
+                      locked_inner.accept_iq_id = None;
+                      locked_inner.jingle_session_id = None;
+                      locked_inner.remote_description = None;
+                      locked_inner.colibri_url = None;
+                      if let Some(colibri_channel) = locked_inner.colibri_channel.take() {
+                        colibri_channel.stop().await;
+                      }
+
+                      if let Err(e) = self.config.agent.session_terminate(self.clone()).await {
+                        error!("agent session_terminate failed: {:?}", e);
+                      }
                     }
                   }
                   else if jingle.action == Action::SourceAdd {
@@ -450,16 +497,46 @@ impl StanzaFilter for Conference {
                       .with_from(Jid::Full(self.jid.clone()));
                     self.xmpp_tx.send(result_iq.into()).await?;
 
-                    let offer_sdp = jingle_to_sdp(&jingle)?;
-
-                    if let Err(e) = self
-                      .config
-                      .agent
-                      .source_added(self.clone(), offer_sdp)
-                      .await
-                    {
-                      error!("agent source_added failed: {:?}", e);
+                    if let Some(offer_sdp) = self.inner.lock().await.remote_description.as_mut() {
+                      offer_sdp.add_sources_from_jingle(&jingle)?;
+                      if let Err(e) = self
+                        .config
+                        .agent
+                        .offer_received(self.clone(), offer_sdp.clone(), false)
+                        .await
+                      {
+                        error!("agent offer_received failed: {:?}", e);
+                      }
                     }
+                    else {
+                      error!("Received source-add with no saved remote description");
+                    }
+                  }
+                  else if jingle.action == Action::SourceRemove {
+                    debug!("Received Jingle source-remove");
+
+                    // Acknowledge the IQ
+                    let result_iq = Iq::empty_result(Jid::Full(from_jid.clone()), iq.id.clone())
+                      .with_from(Jid::Full(self.jid.clone()));
+                    self.xmpp_tx.send(result_iq.into()).await?;
+
+                    if let Some(offer_sdp) = self.inner.lock().await.remote_description.as_mut() {
+                      offer_sdp.remove_sources_from_jingle(&jingle)?;
+                      if let Err(e) = self
+                        .config
+                        .agent
+                        .offer_received(self.clone(), offer_sdp.clone(), false)
+                        .await
+                      {
+                        error!("agent offer_received failed: {:?}", e);
+                      }
+                    }
+                    else {
+                      error!("Received source-add with no saved remote description");
+                    }
+                  }
+                  else {
+                    warn!("Received unhandled Jingle action: {:?}", jingle.action);
                   }
                 }
                 else {
@@ -469,17 +546,24 @@ impl StanzaFilter for Conference {
               Err(e) => debug!("IQ did not successfully parse as Jingle: {:?}", e),
             },
             IqType::Result(_) => {
-              let (accept_iq_id, colibri_url) = {
+              let maybe_colibri_url = {
                 let mut locked_inner = self.inner.lock().await;
-                (
-                  locked_inner.accept_iq_id.take(),
-                  locked_inner.colibri_url.clone(),
-                )
+                if locked_inner.accept_iq_id.as_ref() == Some(&iq.id) {
+                  locked_inner.accept_iq_id = None;
+                  Some(locked_inner.colibri_url.clone())
+                }
+                else {
+                  error!(
+                    "focus acknowledged a session-accept that we didn't send: {}",
+                    iq.id
+                  );
+                  None
+                }
               };
-              if Some(iq.id) == accept_iq_id {
+              if let Some(maybe_colibri_url) = maybe_colibri_url {
                 debug!("Focus acknowledged session-accept");
 
-                if let Some(colibri_url) = colibri_url {
+                if let Some(colibri_url) = maybe_colibri_url {
                   info!("Connecting Colibri WebSocket to {}", colibri_url);
                   let colibri_channel =
                     ColibriChannel::new(&colibri_url, self.tls_insecure).await?;
@@ -541,6 +625,9 @@ impl StanzaFilter for Conference {
                     });
                   }
                 }
+                else {
+                  warn!("No Colibri websocket URL");
+                }
               }
             },
             _ => {},
@@ -580,23 +667,24 @@ impl StanzaFilter for Conference {
                         .nick
                         .or_else(|| nick_payload.as_ref().map(|nick| nick.0.clone())),
                     };
-                    if presence.type_ == presence::Type::Unavailable
-                      && self
+                    if presence.type_ == presence::Type::Unavailable {
+                      if self
                         .inner
                         .lock()
                         .await
                         .participants
                         .remove(&from.resource.clone())
                         .is_some()
-                    {
-                      debug!("participant left: {:?}", jid);
-                      if let Err(e) = self
-                        .config
-                        .agent
-                        .participant_left(self.clone(), participant)
-                        .await
                       {
-                        error!("agent participant_left failed: {:?}", e);
+                        debug!("participant left: {:?}", jid);
+                        if let Err(e) = self
+                          .config
+                          .agent
+                          .participant_left(self.clone(), participant)
+                          .await
+                        {
+                          error!("agent participant_left failed: {:?}", e);
+                        }
                       }
                     }
                     else if self

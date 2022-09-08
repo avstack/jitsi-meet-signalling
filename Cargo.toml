@@ -19,7 +19,7 @@ colibri = { version = "0.1", default-features = false }
 futures = { version = "0.3", default-features = false }
 hex = { version = "0.4", default-features = false, features = ["std"] }
 itertools = { version = "0.10", default-features = false, features = ["use_std"] }
-jitsi-jingle-sdp = { path = "../jitsi-jingle-sdp", version = "0.1", default-features = false }
+jitsi-jingle-sdp = { path = "../jitsi-jingle-sdp", version = "0.2", default-features = false }
 jitsi-xmpp-parsers = { version = "0.1", default-features = false }
 maplit = { version = "1", default-features = false }
 native-tls = { version = "0.2", default-features = false, optional = true }
@@ -36,13 +36,6 @@ tokio = { version = "1", default-features = false, features = ["rt-multi-thread"
 tokio-stream = { version = "0.1", default-features = false, features = ["time"] }
 tokio-tungstenite = { version = "0.17", default-features = false, features = ["connect"] }
 tracing = { version = "0.1", default-features = false, features = ["attributes", "std"] }
-tracing-subscriber = { version = "0.3", optional = true, default-features = false, features = [
-  "fmt",
-  "registry",
-  "smallvec",
-  "parking_lot",
-  "tracing-log",
-] }
 uuid = { version = "0.8", default-features = false, features = ["v4"] }
 webpki-roots = { version = "0.22", default-features = false, optional = true }
 xmpp-parsers = { version = "0.19", default-features = false, features = ["disable-validation"] }

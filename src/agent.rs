@@ -17,6 +17,11 @@ pub trait Agent {
     conference: Conference,
     message: ColibriMessage,
   ) -> Result<()>;
-  async fn offer_received(&self, conference: Conference, offer: SessionDescription) -> Result<()>;
-  async fn source_added(&self, conference: Conference, offer: SessionDescription) -> Result<()>;
+  async fn offer_received(
+    &self,
+    conference: Conference,
+    offer: SessionDescription,
+    should_send_answer: bool,
+  ) -> Result<()>;
+  async fn session_terminate(&self, conference: Conference) -> anyhow::Result<()>;
 }

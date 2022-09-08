@@ -8,7 +8,7 @@ use futures::{
 };
 use rand::{thread_rng, RngCore};
 use tokio::{
-  sync::{mpsc, Mutex},
+  sync::{mpsc, oneshot, Mutex},
   time::sleep,
 };
 use tokio_stream::wrappers::ReceiverStream;
@@ -27,6 +27,7 @@ const CONNECT_RETRY_SLEEP: Duration = Duration::from_secs(3);
 pub(crate) struct ColibriChannel {
   send_tx: mpsc::Sender<ColibriMessage>,
   recv_tx: Arc<Mutex<Vec<mpsc::Sender<ColibriMessage>>>>,
+  stop_tx: Arc<Mutex<Option<oneshot::Sender<()>>>>,
 }
 
 impl ColibriChannel {
@@ -128,6 +129,8 @@ impl ColibriChannel {
       Ok::<_, anyhow::Error>(())
     });
 
+    let (stop_tx, stop_rx) = oneshot::channel();
+
     tokio::spawn(async move {
       tokio::select! {
         res = recv_task => if let Ok(Err(e)) = res {
@@ -136,10 +139,15 @@ impl ColibriChannel {
         res = send_task => if let Ok(Err(e)) = res {
           error!("colibri send loop: {:?}", e);
         },
+        _ = stop_rx => info!("colibri task stopped"),
       };
     });
 
-    Ok(Self { send_tx, recv_tx })
+    Ok(Self {
+      send_tx,
+      recv_tx,
+      stop_tx: Arc::new(Mutex::new(Some(stop_tx))),
+    })
   }
 
   pub(crate) async fn subscribe(&self, tx: mpsc::Sender<ColibriMessage>) {
@@ -149,5 +157,11 @@ impl ColibriChannel {
   pub(crate) async fn send(&self, msg: ColibriMessage) -> Result<()> {
     self.send_tx.send(msg).await?;
     Ok(())
+  }
+
+  pub(crate) async fn stop(self) {
+    if let Some(stop_tx) = self.stop_tx.lock().await.take() {
+      let _ = stop_tx.send(());
+    }
   }
 }

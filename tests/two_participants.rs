@@ -1,8 +1,10 @@
 use std::sync::Arc;
 
 use anyhow::Result;
-use lib_jitsi_meet::{Agent, Authentication, ColibriMessage, Conference, Connection, Participant, SessionDescription};
-use tokio::sync::{Mutex, oneshot};
+use jitsi_meet_signalling::{
+  Agent, Authentication, ColibriMessage, Conference, Connection, Participant, SessionDescription,
+};
+use tokio::sync::{oneshot, Mutex};
 use tracing::info;
 
 struct TestAgent {
@@ -11,7 +13,9 @@ struct TestAgent {
 
 impl TestAgent {
   fn new(offer_received_tx: oneshot::Sender<()>) -> Self {
-    Self { offer_received_tx: Mutex::new(Some(offer_received_tx)) }
+    Self {
+      offer_received_tx: Mutex::new(Some(offer_received_tx)),
+    }
   }
 }
 
@@ -26,7 +30,11 @@ impl Agent for TestAgent {
     Ok(())
   }
 
-  async fn participant_left(&self, _conference: Conference, participant: Participant) -> Result<()> {
+  async fn participant_left(
+    &self,
+    _conference: Conference,
+    participant: Participant,
+  ) -> Result<()> {
     info!("participant left: {:?}", participant);
     Ok(())
   }
@@ -63,24 +71,34 @@ async fn two_participants() {
     "avstack.onavstack.net",
     Authentication::Anonymous,
     false,
-  ).await.unwrap();
+  )
+  .await
+  .unwrap();
 
   let (tx, rx_1) = oneshot::channel();
   let agent_1 = TestAgent::new(tx);
 
-  let _conference_1 = connection_1.join("native", "rust-1", Arc::new(agent_1)).await.unwrap();
+  let _conference_1 = connection_1
+    .join("native", "rust-1", Arc::new(agent_1))
+    .await
+    .unwrap();
 
   let connection_2 = Connection::connect(
     "wss://meet.avstack.io/avstack/xmpp-websocket",
     "avstack.onavstack.net",
     Authentication::Anonymous,
     false,
-  ).await.unwrap();
+  )
+  .await
+  .unwrap();
 
   let (tx, rx_2) = oneshot::channel();
   let agent_2 = TestAgent::new(tx);
 
-  let _conference_2 = connection_2.join("native", "rust-2", Arc::new(agent_2)).await.unwrap();
+  let _conference_2 = connection_2
+    .join("native", "rust-2", Arc::new(agent_2))
+    .await
+    .unwrap();
 
   let (r1, r2) = tokio::join!(rx_1, rx_2);
   r1.unwrap();
