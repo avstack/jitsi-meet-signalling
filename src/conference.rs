@@ -245,7 +245,7 @@ impl Conference {
     // TODO
   }
 
-  fn endpoint_id(&self) -> Result<&str> {
+  pub fn endpoint_id(&self) -> Result<&str> {
     self
       .jid
       .node
@@ -256,7 +256,7 @@ impl Conference {
       .ok_or_else(|| anyhow!("invalid jid"))
   }
 
-  fn jid_in_muc(&self) -> Result<FullJid> {
+  pub fn jid_in_muc(&self) -> Result<FullJid> {
     Ok(self.config.muc.clone().with_resource(self.endpoint_id()?))
   }
 
