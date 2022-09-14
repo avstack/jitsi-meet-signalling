@@ -27,6 +27,8 @@ impl JidEndpointIdExt for BareJid {
 }
 
 fn endpoint_id_from_node(node: &str) -> Result<&str> {
-  let (before, _after) = node.split_once('-').context("invalid JID: invalid node format")?;
+  let (before, _after) = node
+    .split_once('-')
+    .context("invalid JID: invalid node format")?;
   Ok(before)
 }
