@@ -35,7 +35,7 @@ use crate::{
   source::MediaType,
   stanza_filter::StanzaFilter,
   util::generate_id,
-  xmpp::{self, connection::Connection},
+  xmpp::{self, connection::Connection, jid::JidEndpointIdExt},
 };
 
 const SEND_STATS_INTERVAL: Duration = Duration::from_secs(10);
@@ -105,6 +105,12 @@ pub struct Participant {
   pub jid: Option<FullJid>,
   pub muc_jid: FullJid,
   pub nick: Option<String>,
+}
+
+impl Participant {
+  pub fn endpoint_id(&self) -> Result<&str> {
+    self.jid.as_ref().context("no JID")?.endpoint_id()
+  }
 }
 
 pub(crate) struct ConferenceInner {
@@ -246,14 +252,7 @@ impl Conference {
   }
 
   pub fn endpoint_id(&self) -> Result<&str> {
-    self
-      .jid
-      .node
-      .as_ref()
-      .ok_or_else(|| anyhow!("invalid jid"))?
-      .split('-')
-      .next()
-      .ok_or_else(|| anyhow!("invalid jid"))
+    self.jid.endpoint_id()
   }
 
   pub fn jid_in_muc(&self) -> Result<FullJid> {
