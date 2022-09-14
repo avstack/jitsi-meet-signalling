@@ -255,6 +255,16 @@ impl Conference {
     self.jid.endpoint_id()
   }
 
+  pub async fn participant(&self, endpoint_id: &str) -> Option<Participant> {
+    self
+      .inner
+      .lock()
+      .await
+      .participants
+      .get(endpoint_id)
+      .cloned()
+  }
+
   pub fn jid_in_muc(&self) -> Result<FullJid> {
     Ok(self.config.muc.clone().with_resource(self.endpoint_id()?))
   }
