@@ -207,10 +207,18 @@ impl Connection {
     let mut rx = ReceiverStream::new(rx);
     while let Some(element) = rx.next().await {
       let mut bytes = Vec::new();
-      element.write_to(&mut bytes)?;
-      let xml = String::from_utf8(bytes)?;
-      debug!("XMPP    >>> {}", xml);
-      sink.send(Message::Text(xml)).await?;
+      match element.write_to(&mut bytes) {
+        Ok(_) => match String::from_utf8(bytes) {
+          Ok(xml) => {
+            debug!("XMPP    >>> {}", xml);
+            sink.send(Message::Text(xml)).await?;
+          },
+          Err(e) => {
+            bail!("Element serialised to invalid UTF-8. Lossy UTF-8 decode follows:\n{}", String::from_utf8_lossy(e.as_bytes()));
+          },
+        },
+        Err(e) => bail!("Failed to serialise element: {:?}", e),
+      }
     }
     Ok(())
   }
