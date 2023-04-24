@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use anyhow::Result;
+use rand::{distributions::Alphanumeric, Rng, thread_rng};
 use jitsi_meet_signalling::{
   Agent, Authentication, ColibriMessage, Conference, Connection, Participant, SessionDescription,
 };
@@ -48,7 +49,7 @@ impl Agent for TestAgent {
     Ok(())
   }
 
-  async fn offer_received(&self, _conference: Conference, offer: SessionDescription) -> Result<()> {
+  async fn offer_received(&self, _conference: Conference, offer: SessionDescription, _should_send_answer: bool) -> Result<()> {
     info!("offer received: {:?}", offer);
     if let Some(tx) = self.offer_received_tx.lock().await.take() {
       tx.send(()).unwrap();
@@ -56,8 +57,8 @@ impl Agent for TestAgent {
     Ok(())
   }
 
-  async fn source_added(&self, _conference: Conference, offer: SessionDescription) -> Result<()> {
-    info!("source added: {:?}", offer);
+  async fn session_terminate(&self, _conference: Conference) -> Result<()> {
+    info!("session terminated");
     Ok(())
   }
 }
@@ -66,9 +67,15 @@ impl Agent for TestAgent {
 async fn two_participants() {
   tracing_subscriber::fmt::init();
 
+  let suffix: String = thread_rng().sample_iter(&Alphanumeric).take(8).map(char::from).collect();
+  let room_name = format!("jitsi-meet-signalling-test-{}", suffix);
+
+  let websocket_url = format!("wss://meet.avstack.io/avstack/xmpp-websocket?room={}", room_name);
+  let xmpp_domain = "avstack.onavstack.net";
+
   let connection_1 = Connection::connect(
-    "wss://meet.avstack.io/avstack/xmpp-websocket",
-    "avstack.onavstack.net",
+    &websocket_url,
+    xmpp_domain,
     Authentication::Anonymous,
     false,
   )
@@ -79,13 +86,13 @@ async fn two_participants() {
   let agent_1 = TestAgent::new(tx);
 
   let _conference_1 = connection_1
-    .join("native", "rust-1", Arc::new(agent_1))
+    .join(&room_name, "rust-1", Arc::new(agent_1))
     .await
     .unwrap();
 
   let connection_2 = Connection::connect(
-    "wss://meet.avstack.io/avstack/xmpp-websocket",
-    "avstack.onavstack.net",
+    &websocket_url,
+    xmpp_domain,
     Authentication::Anonymous,
     false,
   )
@@ -96,7 +103,7 @@ async fn two_participants() {
   let agent_2 = TestAgent::new(tx);
 
   let _conference_2 = connection_2
-    .join("native", "rust-2", Arc::new(agent_2))
+    .join(&room_name, "rust-2", Arc::new(agent_2))
     .await
     .unwrap();
 
