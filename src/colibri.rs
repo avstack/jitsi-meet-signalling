@@ -1,6 +1,7 @@
 use std::{sync::Arc, time::Duration};
 
 use anyhow::{Context, Result};
+use base64::engine::{Engine as _, general_purpose::STANDARD_NO_PAD as BASE64};
 use colibri::ColibriMessage;
 use futures::{
   sink::SinkExt,
@@ -40,7 +41,7 @@ impl ColibriChannel {
       let mut key = [0u8; 16];
       thread_rng().fill_bytes(&mut key);
       let request = Request::get(&uri)
-        .header("sec-websocket-key", base64::encode(&key))
+        .header("sec-websocket-key", BASE64.encode(key))
         .header("sec-websocket-version", "13")
         .header("host", host)
         // TODO: the server should probably not enforce this since non-browser clients are now possible

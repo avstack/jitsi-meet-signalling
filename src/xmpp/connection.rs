@@ -1,6 +1,7 @@
 use std::{convert::TryFrom, fmt, sync::Arc};
 
 use anyhow::{anyhow, bail, Context, Result};
+use base64::engine::{Engine, general_purpose::STANDARD_NO_PAD as BASE64};
 use futures::{
   sink::{Sink, SinkExt},
   stream::{Stream, StreamExt, TryStreamExt},
@@ -91,7 +92,7 @@ impl Connection {
     thread_rng().fill_bytes(&mut key);
     let request = Request::get(&websocket_url)
       .header("sec-websocket-protocol", "xmpp")
-      .header("sec-websocket-key", base64::encode(&key))
+      .header("sec-websocket-key", BASE64.encode(key))
       .header("sec-websocket-version", "13")
       .header(
         "host",
