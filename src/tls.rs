@@ -6,7 +6,9 @@ use std::sync::Arc;
 
 #[cfg(not(feature = "tls-insecure"))]
 use anyhow::bail;
-use anyhow::{Context, Result};
+#[cfg(any(feature = "tls-rustls-native-roots", feature = "tls-native", feature = "tls-native-vendored"))]
+use anyhow::Context;
+use anyhow::Result;
 use tokio_tungstenite::Connector;
 
 #[cfg(feature = "tls-rustls-native-roots")]
