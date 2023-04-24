@@ -312,10 +312,6 @@ impl Connection {
             info!("My JID: {}", jid);
             locked_inner.jid = Some(jid.clone());
 
-            locked_inner
-              .stanza_filters
-              .push(Box::new(Pinger::new(jid.clone(), tx.clone())));
-
             let iq = Iq::from_get(generate_id(), DiscoInfoQuery { node: None })
               .with_from(Jid::Full(jid.clone()))
               .with_to(Jid::Bare(locked_inner.xmpp_domain.clone()));
@@ -357,6 +353,12 @@ impl Connection {
           if let Some(tx) = locked_inner.connected_tx.take() {
             tx.send(()).unwrap();
           }
+
+          let jid = locked_inner.jid.as_ref().unwrap().clone();
+          locked_inner
+            .stanza_filters
+            .push(Box::new(Pinger::new(jid, tx.clone())));
+
           locked_inner.state = Idle;
         },
         Idle => {
