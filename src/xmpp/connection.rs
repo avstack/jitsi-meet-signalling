@@ -161,7 +161,7 @@ impl Connection {
       ConferenceConfig {
         muc: format!(
           "{}@conference.{}",
-          conference_name, locked_inner.xmpp_domain
+          conference_name.to_lowercase(), locked_inner.xmpp_domain
         )
         .parse()?,
         focus: format!("focus@auth.{}/focus", locked_inner.xmpp_domain).parse()?,
