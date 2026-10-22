@@ -30,7 +30,7 @@ tokio-stream = { version = "0.1", default-features = false, features = ["time"] 
 tokio-tungstenite = { version = "0.18", default-features = false, features = ["connect"] }
 tracing = { version = "0.1", default-features = false, features = ["attributes", "std"] }
 uuid = { version = "1", default-features = false, features = ["v4"] }
-webpki-roots = { version = "0.22", default-features = false, optional = true }
+webpki-roots = { version = "1.0.10", default-features = false, optional = true }
 xmpp-parsers = { git = "https://gitlab.com/xmpp-rs/xmpp-rs.git", default-features = false, features = ["disable-validation"] }
 
 [dev-dependencies]
